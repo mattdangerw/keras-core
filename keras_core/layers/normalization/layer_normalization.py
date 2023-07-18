@@ -1,3 +1,4 @@
+from keras_core import backend
 from keras_core import constraints
 from keras_core import initializers
 from keras_core import ops
@@ -170,9 +171,9 @@ class LayerNormalization(Layer):
         self.built = True
 
     def call(self, inputs):
-        inputs = ops.cast(inputs, self.compute_dtype)
         # Compute the axes along which to reduce the mean / variance
         input_shape = inputs.shape
+        input_dtype = inputs.dtype
         ndims = len(input_shape)
 
         # Broadcasting only necessary for norm when the axis is not just
@@ -190,37 +191,31 @@ class LayerNormalization(Layer):
                 return ops.reshape(v, broadcast_shape)
             return v
 
-        input_dtype = inputs.dtype
-        if input_dtype in ("float16", "bfloat16") and self.dtype == "float32":
-            # If mixed precision is used, cast inputs to float32 so that
-            # this is at least as numerically stable as the fused version.
-            inputs = ops.cast(inputs, "float32")
+        # If mixed precision is used, cast inputs to float32 so that
+        # this is at least as numerically stable as the fused version.
+        with backend.AutocastScope(self.variable_dtype):
+            inputs = ops.cast(inputs, self.variable_dtype)
 
-        # Calculate the mean and variance last axis (layer activations).
-        mean = ops.mean(inputs, axis=self.axis, keepdims=True)
-        variance = ops.var(inputs, axis=self.axis, keepdims=True)
+            # Calculate the mean and variance last axis (layer activations).
+            mean = ops.mean(inputs, axis=self.axis, keepdims=True)
+            variance = ops.var(inputs, axis=self.axis, keepdims=True)
 
-        scale, offset = _broadcast(self.gamma), _broadcast(self.beta)
+            scale, offset = _broadcast(self.gamma), _broadcast(self.beta)
 
-        # Compute the batch normalization.
-        inv = 1 / ops.sqrt(variance + self.epsilon)
-        if scale is not None:
-            scale = ops.cast(scale, inputs.dtype)
-            inv = inv * scale
-        x = -mean * inv
-        if offset is not None:
-            offset = ops.cast(offset, inputs.dtype)
-            x = offset + x
-        outputs = inputs * ops.cast(inv, inputs.dtype) + ops.cast(
-            x, inputs.dtype
-        )
+            # Compute the batch normalization.
+            inv = 1 / ops.sqrt(variance + self.epsilon)
+            if scale is not None:
+                inv = inv * scale
+            x = -mean * inv
+            if offset is not None:
+                x = offset + x
+            outputs = inputs * inv + x
 
-        outputs = ops.cast(outputs, input_dtype)
+            # If some components of the shape got lost due to adjustments, fix
+            # that.
+            outputs = ops.reshape(outputs, ops.shape(inputs))
 
-        # If some components of the shape got lost due to adjustments, fix that.
-        outputs = ops.reshape(outputs, ops.shape(inputs))
-
-        return outputs
+        return ops.cast(outputs, input_dtype)
 
     def compute_output_shape(self, input_shape):
         return input_shape

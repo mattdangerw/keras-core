@@ -1,6 +1,7 @@
 from keras_core import backend
 from keras_core import ops
 from keras_core.api_export import keras_core_export
+from keras_core.backend import standardize_dtype
 
 
 @keras_core_export("keras_core.activations.relu")
@@ -151,7 +152,13 @@ def softmax(x, axis=-1):
         x : Input tensor.
         axis: Integer, axis along which the softmax is applied.
     """
+    input_dtype = x.dtype
+    is_low_precision = standardize_dtype(input_dtype) in ("float16", "bfloat16")
+    if is_low_precision:
+        x = ops.cast(x, "float32")
     output = ops.softmax(x, axis=axis)
+    if is_low_precision:
+        output = ops.cast(output, input_dtype)
     # Cache the logits to use for crossentropy loss.
     try:
         output._keras_logits = x
@@ -329,7 +336,13 @@ def sigmoid(x):
     Args:
         x: Input tensor.
     """
+    input_dtype = x.dtype
+    is_low_precision = standardize_dtype(input_dtype) in ("float16", "bfloat16")
+    if is_low_precision:
+        x = ops.cast(x, "float32")
     output = ops.sigmoid(x)
+    if is_low_precision:
+        output = ops.cast(output, input_dtype)
     # Cache the logits to use for crossentropy loss.
     try:
         output._keras_logits = x

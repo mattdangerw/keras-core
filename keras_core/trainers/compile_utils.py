@@ -5,6 +5,7 @@ from keras_core import losses as losses_module
 from keras_core import metrics as metrics_module
 from keras_core import ops
 from keras_core.utils.naming import get_object_name
+from keras_core.backend import standardize_dtype
 
 
 class MetricsList(metrics_module.Metric):
@@ -599,12 +600,24 @@ class CompileLoss(losses_module.Loss):
             return result
         return tree.flatten(y)
 
+    def _force_full_precision(self, y):
+        """Cast outputs to full precison."""
+        def maybe_cast(e):
+            if standardize_dtype(e.dtype) in ("float16", "bfloat16"):
+                return ops.cast(e, "float32")
+            return e
+
+        return tree.map_structure(maybe_cast, y)
+
     def call(self, y_true, y_pred, sample_weight=None):
         if not self.built:
             self.build(y_true, y_pred)
 
         y_true = self._flatten_y(y_true)
         y_pred = self._flatten_y(y_pred)
+
+        y_true = self._force_full_precision(y_true)
+        y_pred = self._force_full_precision(y_pred)
 
         if sample_weight is not None:
             sample_weight = self._flatten_y(sample_weight)
